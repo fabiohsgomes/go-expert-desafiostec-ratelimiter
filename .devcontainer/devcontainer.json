@@ -1,0 +1,39 @@
+{
+	"name": "Go-expert Desafios técnicos, Rate Limiter",
+	"build":{
+		"context": ".",
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
+		"ghcr.io/devcontainers/features/go:1": {},
+		"ghcr.io/devcontainers/features/common-utils:2": {},
+		"ghcr.io/devcontainers-extra/features/zsh-plugins:0": {
+			"plugins": "git git-flow F-Sy-H zsh-autosuggestions zsh-completions",
+			"omzPlugins": "https://github.com/z-shell/F-Sy-H https://github.com/zsh-users/zsh-autosuggestions https://github.com/zsh-users/zsh-completions"
+		},
+		"ghcr.io/stuartleeks/dev-container-features/shell-history:0": {}
+	},
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"terminal.integrated.profiles.linux": {
+					"zsh": {
+						"path": "/usr/bin/zsh"
+					}
+				},
+				"terminal.integrated.defaultProfile.linux": "zsh"
+			},			
+			"extensions": [
+				"ms-vscode.makefile-tools",
+				"humao.rest-client",
+				"zxh404.vscode-proto3",
+				"GraphQL.vscode-graphql"
+			]
+		}
+	},
+	"postCreateCommand": "make go-install",
+	"containerEnv": {
+		"AMBIENTE_PUBLICACAO":"LOCAL"
+	}
+}
