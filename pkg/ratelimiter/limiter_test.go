@@ -1,193 +1,181 @@
 package ratelimiter
 
 import (
-	"context"
-	"testing"
-	"time"
+        "context"
+        "testing"
+        "time"
+
+        "github.com/stretchr/testify/mock"
+        "github.com/stretchr/testify/suite"
 )
 
-// mockStorage implements the storage.Storage interface for testing
-type mockStorage struct {
-	requestCounts map[string]int64
-	blocked       map[string]bool
+// MockStorage is a mock of the Storage interface using testify/mock
+type MockStorage struct {
+        mock.Mock
 }
 
-func newMockStorage() *mockStorage {
-	return &mockStorage{
-		requestCounts: make(map[string]int64),
-		blocked:       make(map[string]bool),
-	}
+func (m *MockStorage) GetRequestCount(ctx context.Context, key string) (int64, error) {
+        args := m.Called(ctx, key)
+        return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *mockStorage) GetRequestCount(ctx context.Context, key string) (int64, error) {
-	return m.requestCounts[key], nil
+func (m *MockStorage) IncrementRequestCount(ctx context.Context, key string, expiration time.Duration) (int64, error) {
+        args := m.Called(ctx, key, expiration)
+        return args.Get(0).(int64), args.Error(1)
 }
 
-func (m *mockStorage) IncrementRequestCount(ctx context.Context, key string, expiration time.Duration) (int64, error) {
-	m.requestCounts[key]++
-	return m.requestCounts[key], nil
+func (m *MockStorage) IsBlocked(ctx context.Context, key string) (bool, error) {
+        args := m.Called(ctx, key)
+        return args.Bool(0), args.Error(1)
 }
 
-func (m *mockStorage) IsBlocked(ctx context.Context, key string) (bool, error) {
-	return m.blocked[key], nil
+func (m *MockStorage) Block(ctx context.Context, key string, duration time.Duration) error {
+        args := m.Called(ctx, key, duration)
+        return args.Error(0)
 }
 
-func (m *mockStorage) Block(ctx context.Context, key string, duration time.Duration) error {
-	m.blocked[key] = true
-	return nil
+func (m *MockStorage) Close() error {
+        args := m.Called()
+        return args.Error(0)
 }
 
-func (m *mockStorage) Close() error {
-	return nil
+// RateLimiterTestSuite defines the test suite
+type RateLimiterTestSuite struct {
+        suite.Suite
+        mockStorage *MockStorage
+        ctx         context.Context
 }
 
-func TestRateLimiter_IsAllowed(t *testing.T) {
-	tests := []struct {
-		name         string
-		config       *Config
-		key          string
-		isToken      bool
-		requestCount int
-		wantAllowed  bool
-	}{
-		{
-			name: "IP under limit",
-			config: &Config{
-				MaxRequestsPerSecond: 5,
-				BlockDuration:        time.Minute,
-			},
-			key:          "192.168.1.1",
-			isToken:      false,
-			requestCount: 3,
-			wantAllowed:  true,
-		},
-		{
-			name: "IP over limit",
-			config: &Config{
-				MaxRequestsPerSecond: 5,
-				BlockDuration:        time.Minute,
-			},
-			key:          "192.168.1.2",
-			isToken:      false,
-			requestCount: 6,
-			wantAllowed:  false,
-		},
-		{
-			name: "Token under custom limit",
-			config: &Config{
-				MaxRequestsPerSecond: 5,
-				BlockDuration:        time.Minute,
-				TokenLimits: map[string]TokenConfig{
-					"test-token": {
-						MaxRequestsPerSecond: 10,
-						BlockDuration:        time.Minute,
-					},
-				},
-			},
-			key:          "test-token",
-			isToken:      true,
-			requestCount: 8,
-			wantAllowed:  true,
-		},
-		{
-			name: "Token over custom limit",
-			config: &Config{
-				MaxRequestsPerSecond: 5,
-				BlockDuration:        time.Minute,
-				TokenLimits: map[string]TokenConfig{
-					"test-token": {
-						MaxRequestsPerSecond: 10,
-						BlockDuration:        time.Minute,
-					},
-				},
-			},
-			key:          "test-token",
-			isToken:      true,
-			requestCount: 11,
-			wantAllowed:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store := newMockStorage()
-			limiter := New(store, tt.config)
-			ctx := context.Background()
-
-			var lastAllowed bool
-			for i := 0; i < tt.requestCount; i++ {
-				var err error
-				lastAllowed, err = limiter.IsAllowed(ctx, tt.key, tt.isToken)
-				if err != nil {
-					t.Fatalf("IsAllowed error: %v", err)
-				}
-			}
-
-			if lastAllowed != tt.wantAllowed {
-				t.Errorf("IsAllowed() = %v, want %v", lastAllowed, tt.wantAllowed)
-			}
-		})
-	}
+// SetupTest is called before each test
+func (s *RateLimiterTestSuite) SetupTest() {
+        s.mockStorage = new(MockStorage)
+        s.ctx = context.Background()
 }
 
-func TestRateLimiter_GetRemainingRequests(t *testing.T) {
-	tests := []struct {
-		name          string
-		config        *Config
-		key           string
-		isToken       bool
-		requestCount  int
-		wantRemaining int
-	}{
-		{
-			name: "IP requests remaining",
-			config: &Config{
-				MaxRequestsPerSecond: 5,
-			},
-			key:           "192.168.1.1",
-			isToken:       false,
-			requestCount:  2,
-			wantRemaining: 3,
-		},
-		{
-			name: "Token requests remaining",
-			config: &Config{
-				MaxRequestsPerSecond: 5,
-				TokenLimits: map[string]TokenConfig{
-					"test-token": {
-						MaxRequestsPerSecond: 10,
-					},
-				},
-			},
-			key:           "test-token",
-			isToken:       true,
-			requestCount:  4,
-			wantRemaining: 6,
-		},
-	}
+// TestIPUnderLimit tests rate limiting for IPs under the limit
+func (s *RateLimiterTestSuite) TestIPUnderLimit() {
+        config := &Config{
+                MaxRequestsPerSecond: 5,
+                BlockDuration:        time.Minute,
+        }
+        limiter := New(s.mockStorage, config)
+        key := "192.168.1.1"
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store := newMockStorage()
-			limiter := New(store, tt.config)
-			ctx := context.Background()
+        s.mockStorage.On("IsBlocked", s.ctx, key).Return(false, nil)
+        s.mockStorage.On("IncrementRequestCount", s.ctx, key, time.Second).Return(int64(4), nil)
 
-			// Simulate requests
-			for i := 0; i < tt.requestCount; i++ {
-				_, err := limiter.IsAllowed(ctx, tt.key, tt.isToken)
-				if err != nil {
-					t.Fatalf("IsAllowed error: %v", err)
-				}
-			}
+        allowed, err := limiter.IsAllowed(s.ctx, key, false)
+        s.NoError(err)
+        s.True(allowed)
+        s.mockStorage.AssertExpectations(s.T())
+}
 
-			remaining, err := limiter.GetRemainingRequests(ctx, tt.key, tt.isToken)
-			if err != nil {
-				t.Fatalf("GetRemainingRequests error: %v", err)
-			}
+// TestIPOverLimit tests rate limiting for IPs over the limit
+func (s *RateLimiterTestSuite) TestIPOverLimit() {
+        config := &Config{
+                MaxRequestsPerSecond: 5,
+                BlockDuration:        time.Minute,
+        }
+        limiter := New(s.mockStorage, config)
+        key := "192.168.1.2"
 
-			if remaining != tt.wantRemaining {
-				t.Errorf("GetRemainingRequests() = %v, want %v", remaining, tt.wantRemaining)
-			}
-		})
-	}
+        s.mockStorage.On("IsBlocked", s.ctx, key).Return(false, nil)
+        s.mockStorage.On("IncrementRequestCount", s.ctx, key, time.Second).Return(int64(6), nil)
+        s.mockStorage.On("Block", s.ctx, key, time.Minute).Return(nil)
+
+        allowed, err := limiter.IsAllowed(s.ctx, key, false)
+        s.NoError(err)
+        s.False(allowed)
+        s.mockStorage.AssertExpectations(s.T())
+}
+
+// TestTokenUnderCustomLimit tests rate limiting for tokens under their custom limit
+func (s *RateLimiterTestSuite) TestTokenUnderCustomLimit() {
+        config := &Config{
+                MaxRequestsPerSecond: 5,
+                BlockDuration:        time.Minute,
+                TokenLimits: map[string]TokenConfig{
+                        "test-token": {
+                                MaxRequestsPerSecond: 10,
+                                BlockDuration:        time.Minute,
+                        },
+                },
+        }
+        limiter := New(s.mockStorage, config)
+        key := "test-token"
+
+        s.mockStorage.On("IsBlocked", s.ctx, key).Return(false, nil)
+        s.mockStorage.On("IncrementRequestCount", s.ctx, key, time.Second).Return(int64(9), nil)
+
+        allowed, err := limiter.IsAllowed(s.ctx, key, true)
+        s.NoError(err)
+        s.True(allowed)
+        s.mockStorage.AssertExpectations(s.T())
+}
+
+// TestTokenOverCustomLimit tests rate limiting for tokens over their custom limit
+func (s *RateLimiterTestSuite) TestTokenOverCustomLimit() {
+        config := &Config{
+                MaxRequestsPerSecond: 5,
+                BlockDuration:        time.Minute,
+                TokenLimits: map[string]TokenConfig{
+                        "test-token": {
+                                MaxRequestsPerSecond: 10,
+                                BlockDuration:        time.Minute,
+                        },
+                },
+        }
+        limiter := New(s.mockStorage, config)
+        key := "test-token"
+
+        s.mockStorage.On("IsBlocked", s.ctx, key).Return(false, nil)
+        s.mockStorage.On("IncrementRequestCount", s.ctx, key, time.Second).Return(int64(11), nil)
+        s.mockStorage.On("Block", s.ctx, key, time.Minute).Return(nil)
+
+        allowed, err := limiter.IsAllowed(s.ctx, key, true)
+        s.NoError(err)
+        s.False(allowed)
+        s.mockStorage.AssertExpectations(s.T())
+}
+
+// TestGetRemainingRequestsIP tests getting remaining requests for IP-based limiting
+func (s *RateLimiterTestSuite) TestGetRemainingRequestsIP() {
+        config := &Config{
+                MaxRequestsPerSecond: 5,
+        }
+        limiter := New(s.mockStorage, config)
+        key := "192.168.1.1"
+
+        s.mockStorage.On("GetRequestCount", s.ctx, key).Return(int64(2), nil)
+
+        remaining, err := limiter.GetRemainingRequests(s.ctx, key, false)
+        s.NoError(err)
+        s.Equal(3, remaining)
+        s.mockStorage.AssertExpectations(s.T())
+}
+
+// TestGetRemainingRequestsToken tests getting remaining requests for token-based limiting
+func (s *RateLimiterTestSuite) TestGetRemainingRequestsToken() {
+        config := &Config{
+                MaxRequestsPerSecond: 5,
+                TokenLimits: map[string]TokenConfig{
+                        "test-token": {
+                                MaxRequestsPerSecond: 10,
+                        },
+                },
+        }
+        limiter := New(s.mockStorage, config)
+        key := "test-token"
+
+        s.mockStorage.On("GetRequestCount", s.ctx, key).Return(int64(4), nil)
+
+        remaining, err := limiter.GetRemainingRequests(s.ctx, key, true)
+        s.NoError(err)
+        s.Equal(6, remaining)
+        s.mockStorage.AssertExpectations(s.T())
+}
+
+// TestRateLimiterSuite runs the test suite
+func TestRateLimiterSuite(t *testing.T) {
+        suite.Run(t, new(RateLimiterTestSuite))
 }

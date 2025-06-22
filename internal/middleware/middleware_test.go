@@ -3,12 +3,14 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/pkg/ratelimiter"
+	"github.com/stretchr/testify/suite"
 )
 
 // mockLimiter implements a simple mock of the rate limiter for testing
@@ -25,12 +27,41 @@ func (m *mockLimiter) GetRemainingRequests(ctx context.Context, key string, isTo
 	return 0, nil
 }
 
-func TestRateLimiterMiddleware(t *testing.T) {
+type MiddlewareTestSuite struct {
+	suite.Suite
+	config      *ratelimiter.Config
+	nextHandler http.Handler
+}
+
+func (s *MiddlewareTestSuite) SetupTest() {
+	s.config = &ratelimiter.Config{
+		MaxRequestsPerSecond: 10,
+		BlockDuration:        time.Minute,
+		TokenHeader:          "API_KEY",
+	}
+	s.nextHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func (s *MiddlewareTestSuite) createMiddleware(allowed bool, err error) *RateLimiterMiddleware {
+	mockLimiter := &mockLimiter{
+		allowed: allowed,
+		err:     err,
+	}
+	return &RateLimiterMiddleware{
+		limiter: mockLimiter,
+		config:  s.config,
+	}
+}
+
+func (s *MiddlewareTestSuite) TestRateLimiterMiddleware() {
 	tests := []struct {
 		name           string
 		limiterAllowed bool
 		limiterErr     error
 		token          string
+		headers        map[string]string
 		wantStatus     int
 		wantError      string
 	}{
@@ -58,68 +89,61 @@ func TestRateLimiterMiddleware(t *testing.T) {
 			wantStatus:     http.StatusTooManyRequests,
 			wantError:      "you have reached the maximum number of requests or actions allowed within a certain time frame",
 		},
+		{
+			name:       "Limiter error with token",
+			limiterErr: errors.New("storage error"),
+			token:      "test-token",
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:       "Limiter error with IP",
+			limiterErr: errors.New("storage error"),
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name:           "Multiple IPs in X-Forwarded-For",
+			limiterAllowed: true,
+			headers: map[string]string{
+				"X-Forwarded-For": "192.168.1.1, 10.0.0.1",
+			},
+			wantStatus: http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create mock limiter
-			mockLimiter := &mockLimiter{
-				allowed: tt.limiterAllowed,
-				err:     tt.limiterErr,
-			}
+		s.Run(tt.name, func() {
+			middleware := s.createMiddleware(tt.limiterAllowed, tt.limiterErr)
 
-			// Create config
-			config := &ratelimiter.Config{
-				MaxRequestsPerSecond: 10,
-				BlockDuration:        time.Minute,
-				TokenHeader:          "API_KEY",
-			}
-
-			// Create middleware
-			middleware := &RateLimiterMiddleware{
-				limiter: mockLimiter,
-				config:  config,
-			}
-
-			// Create test handler
-			nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			})
-
-			// Create test request
 			req := httptest.NewRequest("GET", "http://example.com/foo", nil)
 			if tt.token != "" {
 				req.Header.Set("API_KEY", tt.token)
 			}
-
-			// Create response recorder
-			w := httptest.NewRecorder()
-
-			// Execute middleware
-			middleware.Handler(nextHandler).ServeHTTP(w, req)
-
-			// Check status code
-			if w.Code != tt.wantStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v",
-					w.Code, tt.wantStatus)
+			if tt.headers != nil {
+				for k, v := range tt.headers {
+					req.Header.Set(k, v)
+				}
 			}
 
-			// Check error message for blocked requests
+			w := httptest.NewRecorder()
+			middleware.Handler(s.nextHandler).ServeHTTP(w, req)
+
+			s.Equal(tt.wantStatus, w.Code, "handler returned wrong status code")
+
 			if tt.wantError != "" {
 				var response ErrorResponse
-				if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-					t.Fatalf("Failed to decode response body: %v", err)
-				}
-				if response.Error != tt.wantError {
-					t.Errorf("handler returned wrong error message: got %v want %v",
-						response.Error, tt.wantError)
-				}
+				err := json.NewDecoder(w.Body).Decode(&response)
+				s.NoError(err, "Failed to decode response body")
+				s.Equal(tt.wantError, response.Error, "handler returned wrong error message")
 			}
 		})
 	}
 }
 
-func TestGetClientIP(t *testing.T) {
+type GetClientIPTestSuite struct {
+	suite.Suite
+}
+
+func (s *GetClientIPTestSuite) TestGetClientIP() {
 	tests := []struct {
 		name       string
 		headers    map[string]string
@@ -148,10 +172,32 @@ func TestGetClientIP(t *testing.T) {
 			remoteAddr: "192.168.1.3:1234",
 			want:       "192.168.1.3",
 		},
+		{
+			name: "Multiple IPs in X-Forwarded-For",
+			headers: map[string]string{
+				"X-Forwarded-For": "192.168.1.1, 10.0.0.1",
+			},
+			remoteAddr: "10.0.0.1:1234",
+			want:       "192.168.1.1",
+		},
+		{
+			name: "Empty X-Forwarded-For",
+			headers: map[string]string{
+				"X-Forwarded-For": "",
+			},
+			remoteAddr: "192.168.1.3:1234",
+			want:       "192.168.1.3",
+		},
+		{
+			name:       "Invalid RemoteAddr format",
+			headers:    map[string]string{},
+			remoteAddr: "invalid",
+			want:       "invalid",
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		s.Run(tt.name, func() {
 			req := httptest.NewRequest("GET", "http://example.com/foo", nil)
 			req.RemoteAddr = tt.remoteAddr
 			for k, v := range tt.headers {
@@ -159,9 +205,12 @@ func TestGetClientIP(t *testing.T) {
 			}
 
 			got := getClientIP(req)
-			if got != tt.want {
-				t.Errorf("getClientIP() = %v, want %v", got, tt.want)
-			}
+			s.Equal(tt.want, got, "getClientIP() returned unexpected value")
 		})
 	}
+}
+
+func TestMiddleware(t *testing.T) {
+	suite.Run(t, new(MiddlewareTestSuite))
+	suite.Run(t, new(GetClientIPTestSuite))
 }
