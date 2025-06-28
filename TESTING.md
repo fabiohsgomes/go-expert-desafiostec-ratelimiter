@@ -4,19 +4,19 @@ Este documento descreve os testes de integração implementados para o middlewar
 
 ## Tipos de Testes
 
-### 1. Testes de Middleware (`internal/middleware/integration_test.go`)
+### 1. Testes de Middleware (`pkg/middleware/integration_test.go`)
 
 Testa o middleware isoladamente com storage em memória:
 
 ```bash
 # Executar todos os testes do middleware
-go test ./internal/middleware -v
+go test ./pkg/middleware -v
 
 # Executar apenas testes de integração
-go test ./internal/middleware -v -run TestRateLimiterMiddleware_Integration
+go test ./pkg/middleware -v -run TestRateLimiterMiddleware_Integration
 
 # Executar testes de tratamento de erros
-go test ./internal/middleware -v -run TestRateLimiterMiddleware_ErrorHandling
+go test ./pkg/middleware -v -run TestRateLimiterMiddleware_ErrorHandling
 ```
 
 **Cenários testados:**
@@ -88,19 +88,39 @@ docker-compose up -d redis
 export REDIS_ADDR=localhost:6379
 ```
 
-## Executar Todos os Testes
+## Executando os Testes
 
 ```bash
-# Testes básicos (sem Redis)
+# Executar todos os testes (excluindo integração com Redis)
 go test ./... -v
 
-# Incluindo testes com Redis
-go test ./... -v
+# Executar testes de integração com Redis
 go test ./test -tags=integration -v
 
-# Com coverage
-go test ./... -v -coverprofile=coverage.out
-go tool cover -html=coverage.out
+# Executar suítes de teste específicas
+go test ./pkg/middleware -v     # Apenas testes do middleware
+go test ./test -v                   # Apenas testes de integração
+go test ./test -run TestRedis -tags=integration -v  # Apenas testes do Redis
+
+# Executar com relatório de cobertura
+go test ./... -v -coverprofile=coverage.out && \
+go test ./test -tags=integration -v -coverprofile=coverage_redis.out && \
+go tool cover -html=coverage.out -o coverage.html
+```
+
+### Tags de Teste
+
+- `integration`: Necessário para testes de integração com Redis
+- `benchmark`: Executa apenas testes de performance
+- `short`: Pula testes de longa duração
+
+Exemplo:
+```bash
+# Executar apenas testes rápidos
+go test ./... -short -v
+
+# Executar benchmarks
+go test -bench=. -benchmem ./...
 ```
 
 ## Resultados Esperados
@@ -123,15 +143,33 @@ Os testes cobrem:
 ## Estrutura dos Testes
 
 ```
-/workspaces/ratelimiter/
-├── internal/middleware/
-│   └── integration_test.go      # Testes do middleware
+/workspace/
+├── pkg/middleware/
+│   └── integration_test.go      # Testes de integração do middleware
 ├── test/
-│   ├── memory.go               # Storage em memória para testes
-│   ├── integration_test.go     # Testes de integração completa
-│   └── redis_integration_test.go # Testes específicos do Redis
-└── TESTING.md                 # Este arquivo
+│   ├── memory.go               # Implementação de armazenamento em memória para testes
+│   ├── integration_test.go     # Testes de integração completos
+│   └── redis_integration_test.go # Testes específicos de integração com Redis
+└── TESTING.md                 # Este arquivo de documentação
 ```
+
+### Organização dos Testes
+
+1. **Testes do Middleware** (`pkg/middleware/integration_test.go`)
+   - Testa a funcionalidade do middleware com armazenamento em memória
+   - Inclui tratamento de erros e casos extremos
+   - Usa injeção de dependência para armazenamento
+
+2. **Testes de Integração** (`test/integration_test.go`)
+   - Testes completos do servidor HTTP
+   - Limitação baseada em token e IP
+   - Testes de carregamento de configuração
+   - Testes de performance
+
+3. **Testes do Redis** (`test/redis_integration_test.go`)
+   - Testes de implementação do armazenamento Redis
+   - Testes de limitação distribuída
+   - Testes de configuração do Redis
 
 ## Troubleshooting
 

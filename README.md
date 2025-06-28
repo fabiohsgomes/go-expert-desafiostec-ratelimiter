@@ -20,7 +20,7 @@ go get github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter
 
 ## Configuração
 
-O ratelimiter pode ser configurado através de variáveis de ambiente ou um arquivo .env:
+O ratelimiter pode ser configurado através de variáveis de ambiente ou um arquivo .env. A configuração é carregada automaticamente através das funções `middleware.LoadConfig()` e `middleware.LoadRedisConfig()`:
 
 ```env
 # Configurações gerais de limitação de taxa
@@ -29,9 +29,26 @@ RATE_LIMIT_BLOCK_DURATION=5m      # Duração do bloqueio após limite excedido
 RATE_LIMIT_TOKEN_HEADER=API_KEY   # Nome do cabeçalho para tokens de API
 
 # Configuração do Redis
-REDIS_ADDR=localhost:6379
-REDIS_PASSWORD=
-REDIS_DB=0
+REDIS_ADDR=localhost:6379         # Endereço do servidor Redis
+REDIS_PASSWORD=                   # Senha do Redis (opcional)
+REDIS_DB=0                       # Número do banco de dados Redis
+
+# Configurações avançadas
+RATE_LIMIT_ENABLED=true          # Habilita/desabilita o rate limiting
+RATE_LIMIT_CLEANUP_INTERVAL=5m   # Intervalo de limpeza de registros expirados
+```
+
+As configurações podem ser carregadas programaticamente:
+
+```go
+// Carrega configuração do rate limiter
+cfg, err := middleware.LoadConfig()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Carrega configuração do Redis
+addr, password, db := middleware.LoadRedisConfig()
 ```
 
 ## Uso
@@ -42,18 +59,32 @@ REDIS_DB=0
 package main
 
 import (
-    "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/internal/config"
-    "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/internal/middleware"
+    "log"
+    "net/http"
+    "time"
+
+    "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/pkg/middleware"
     "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/pkg/ratelimiter"
     "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/pkg/storage"
 )
 
 func main() {
     // Carrega configuração
-    cfg, _ := config.LoadConfig()
+    cfg, err := middleware.LoadConfig()
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Configura limites de token
+    cfg.SetTokenLimit("abc123", 100, time.Minute*5)
+    cfg.SetTokenLimit("xyz789", 50, time.Minute*10)
 
     // Inicializa armazenamento Redis
-    store, _ := storage.NewRedisStorage("localhost:6379", "", 0)
+    addr, password, db := middleware.LoadRedisConfig()
+    store, err := storage.NewRedisStorage(addr, password, db)
+    if err != nil {
+        log.Fatal(err)
+    }
     defer store.Close()
 
     // Cria ratelimiter
@@ -62,9 +93,19 @@ func main() {
     // Cria middleware
     rateLimiterMiddleware := middleware.New(limiter, cfg)
 
-    // Hander http
-    http.Handle("/", rateLimiterMiddleware.Handler(yourHandler))
-    http.ListenAndServe(":8080", nil)
+    // Cria um handler simples
+    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte("Hello, World!"))
+    })
+
+    // Aplica o middleware ao handler
+    http.Handle("/", rateLimiterMiddleware.Handler(handler))
+
+    // Inicia o servidor
+    log.Println("Servidor iniciando na porta :8080")
+    if err := http.ListenAndServe(":8080", nil); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
