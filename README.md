@@ -147,8 +147,12 @@ O ratelimiter usa Redis para rastrear contagens de requisições e status de blo
 
 ## Testes
 
-Para executar os testes:
+Para informações detalhadas sobre testes de unidade e integração, consulte o arquivo [TESTING.md](TESTING.md).
 
 ```bash
-go test ./...
+# Executar todos os testes
+go test ./... -v
+
+# Executar testes de integração com Redis
+go test ./test -tags=integration -v
 ```
