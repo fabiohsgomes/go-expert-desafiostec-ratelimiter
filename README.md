@@ -75,9 +75,8 @@ func main() {
         log.Fatal(err)
     }
 
-    // Configura limites de token
-    cfg.SetTokenLimit("abc123", 100, time.Minute*5)
-    cfg.SetTokenLimit("xyz789", 50, time.Minute*10)
+    // Carrega limites de token das variáveis de ambiente
+    cfg.LoadTokenLimitsFromEnv()
 
     // Inicializa armazenamento Redis
     addr, password, db := middleware.LoadRedisConfig()
@@ -111,18 +110,37 @@ func main() {
 
 ### Configurando Limites de Token
 
+Os limites de token podem ser configurados através de variáveis de ambiente:
+
+```env
+# Formato: TOKEN_LIMIT_<TOKEN>=<requests>:<duration>
+TOKEN_LIMIT_ABC123=100:5m         # 100 req/s, bloqueio 5min
+TOKEN_LIMIT_XYZ789=50:10m         # 50 req/s, bloqueio 10min
+TOKEN_LIMIT_PREMIUM=1000:1m       # 1000 req/s, bloqueio 1min
+```
+
+Ou programaticamente:
+
 ```go
 cfg := ratelimiter.NewConfig()
-cfg.SetTokenLimit("abc123", 100, time.Minute*5)  // 100 requisições por segundo, bloqueio de 5 minutos
+cfg.LoadTokenLimitsFromEnv()  // Carrega das variáveis de ambiente
+// ou
+cfg.SetTokenLimit("abc123", 100, time.Minute*5)  // Configuração manual
 ```
 
-## Configuração do Redis
+## Executando com Docker
 
-Um arquivo docker-compose.yml é fornecido para facilitar a configuração do Redis:
+Um arquivo docker-compose.yml é fornecido para executar a aplicação completa:
 
 ```bash
+# Executar aplicação e Redis
 docker-compose up -d
+
+# Apenas Redis para desenvolvimento
+docker-compose up -d redis
 ```
+
+A aplicação estará disponível em http://localhost:8080
 
 ## Códigos de Resposta
 

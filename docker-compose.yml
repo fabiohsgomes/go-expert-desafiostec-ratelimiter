@@ -1,4 +1,23 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - RATE_LIMIT_MAX_REQUESTS=10
+      - RATE_LIMIT_BLOCK_DURATION=5m
+      - RATE_LIMIT_TOKEN_HEADER=API_KEY
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - TOKEN_LIMIT_ABC123=100:5m
+      - TOKEN_LIMIT_XYZ789=50:10m
+      - TOKEN_LIMIT_PREMIUM=1000:1m
+    depends_on:
+      - redis
+
   redis:
     image: redis:alpine
     ports:

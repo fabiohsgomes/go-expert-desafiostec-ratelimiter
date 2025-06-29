@@ -3,7 +3,6 @@ package main
 import (
         "log"
         "net/http"
-        "time"
 
         "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/pkg/middleware"
         "github.com/fabiohsgomes/go-expert-desafiostec-ratelimiter/pkg/ratelimiter"
@@ -17,9 +16,8 @@ func main() {
                 log.Fatal(err)
         }
 
-        // Configure some token limits
-        cfg.SetTokenLimit("abc123", 100, time.Minute*5)
-        cfg.SetTokenLimit("xyz789", 50, time.Minute*10)
+        // Load token limits from environment variables
+        cfg.LoadTokenLimitsFromEnv()
 
         // Initialize Redis storage
         addr, password, db := middleware.LoadRedisConfig()

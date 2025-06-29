@@ -1,6 +1,11 @@
 package ratelimiter
 
-import "time"
+import (
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Config holds the rate limiter configuration
 type Config struct {
@@ -38,5 +43,37 @@ func (c *Config) SetTokenLimit(token string, maxRequests int, blockDuration time
 	c.TokenLimits[token] = TokenConfig{
 		MaxRequestsPerSecond: maxRequests,
 		BlockDuration:       blockDuration,
+	}
+}
+
+// LoadTokenLimitsFromEnv loads token limits from environment variables
+// Format: TOKEN_LIMIT_<TOKEN>=<requests>:<duration>
+// Example: TOKEN_LIMIT_ABC123=100:5m
+func (c *Config) LoadTokenLimitsFromEnv() {
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, "TOKEN_LIMIT_") {
+			parts := strings.SplitN(env, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			
+			token := strings.TrimPrefix(parts[0], "TOKEN_LIMIT_")
+			limitParts := strings.Split(parts[1], ":")
+			if len(limitParts) != 2 {
+				continue
+			}
+			
+			requests, err := strconv.Atoi(limitParts[0])
+			if err != nil {
+				continue
+			}
+			
+			duration, err := time.ParseDuration(limitParts[1])
+			if err != nil {
+				continue
+			}
+			
+			c.SetTokenLimit(token, requests, duration)
+		}
 	}
 }
